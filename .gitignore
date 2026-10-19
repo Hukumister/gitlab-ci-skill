@@ -1,0 +1,6 @@
+.idea/
+.junie/
+_to_delete/
+.DS_Store
+__pycache__/
+.gitlab-ci-mr-probe.yml

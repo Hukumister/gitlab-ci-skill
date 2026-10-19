@@ -1,0 +1,122 @@
+# Стартовый шаблон .gitlab-ci.yml для нового пайплайна.
+# В существующем проекте повторяй его структуру, этот файл там не нужен.
+# Замени TODO, удали ненужные джобы. Логика джоб живёт в scripts/ci/*.sh,
+# здесь описано только, когда и где они запускаются.
+
+include:
+  - local: .gitlab/ci/rules.yml   # шаблоны правил, см. assets/rules.yml
+
+# Пускаем только события, под которые есть шаблоны в rules.yml.
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+  auto_cancel:
+    on_new_commit: interruptible   # требует свежего GitLab; в старых убери блок
+
+stages:
+  - check
+  - build
+  - test
+  - deploy
+
+variables:
+  FF_USE_FASTZIP: "true"
+  ARTIFACT_COMPRESSION_LEVEL: fast
+  CACHE_COMPRESSION_LEVEL: fast
+
+default:
+  image: registry.example.com/ci/base:1.0.0   # TODO: базовый образ с фиксированной версией
+  tags: [docker]                               # TODO: теги раннеров команды
+  interruptible: true
+  timeout: 30m
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
+      - api_failure
+
+.deps-cache:
+  cache:
+    key:
+      files:
+        - deps.lock          # TODO: lock-файл зависимостей
+    paths:
+      - .cache/deps/         # TODO: каталог кэша внутри $CI_PROJECT_DIR
+    policy: pull
+
+lint:
+  stage: check
+  needs: []
+  extends: [.deps-cache, .rules-mr-and-main]
+  script:
+    - ./scripts/ci/lint.sh
+
+build:
+  stage: build
+  needs: []
+  extends: .deps-cache
+  cache:
+    policy: pull-push      # кэш обновляет только эта джоба
+  rules:
+    - !reference [.rules-mr, rules]
+    - !reference [.rules-main, rules]
+    - !reference [.rules-release, rules]
+    - !reference [.rules-nightly, rules]
+  script:
+    - ./scripts/ci/build.sh
+  artifacts:
+    paths:
+      - build/output/      # TODO
+    expire_in: 3 days
+
+unit-tests:
+  stage: test
+  needs: []
+  extends: [.deps-cache, .rules-mr-and-main]
+  script:
+    - ./scripts/ci/unit-tests.sh
+  artifacts:
+    when: always
+    reports:
+      junit: build/test-results/**/*.xml   # TODO
+    expire_in: 1 week
+
+ui-tests-full:
+  stage: test
+  needs: [build]
+  extends: .rules-nightly
+  timeout: 2h
+  script:
+    - ./scripts/ci/ui-tests.sh --full
+  artifacts:
+    when: always
+    reports:
+      junit: build/ui-test-results/**/*.xml   # TODO
+    expire_in: 1 week
+
+deploy-staging:
+  stage: deploy
+  needs: [lint, build, unit-tests]
+  extends: .rules-main
+  interruptible: false
+  resource_group: staging
+  environment:
+    name: staging
+    url: https://staging.example.com   # TODO
+  script:
+    - ./scripts/ci/deploy.sh staging
+
+deploy-production:
+  stage: deploy
+  needs: [build]
+  extends: .rules-release-manual
+  interruptible: false
+  resource_group: production
+  environment:
+    name: production
+    url: https://example.com           # TODO
+  script:
+    - ./scripts/ci/deploy.sh production

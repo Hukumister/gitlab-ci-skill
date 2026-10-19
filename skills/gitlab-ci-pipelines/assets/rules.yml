@@ -1,0 +1,38 @@
+# Шаблоны условий запуска. В проекте кладётся в .gitlab/ci/rules.yml
+# и подключается из .gitlab-ci.yml через include: local.
+#
+# Один шаблон на событие. Джоба подключает:
+#   одно событие   -> extends: .rules-nightly
+#   несколько      -> rules: [!reference [.rules-mr, rules], !reference [.rules-main, rules]]
+# extends с несколькими шаблонами правил не объединяет условия: останутся правила последнего.
+
+.rules-mr:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+# Расписания тоже идут по основной ветке, поэтому исключаем их явно,
+# иначе ночной пайплайн подхватит всё, что запускается на main.
+.rules-main:
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE != "schedule"
+
+.rules-release:
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/   # TODO: формат релизных тегов
+
+# SCHEDULE_TYPE задаётся в настройках расписания (Build -> Pipeline schedules).
+.rules-nightly:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULE_TYPE == "nightly"
+
+.rules-mr-and-main:
+  rules:
+    - !reference [.rules-mr, rules]
+    - !reference [.rules-main, rules]
+
+# К правилу, подтянутому через !reference, нельзя добавить when/allow_failure,
+# поэтому ручной вариант повторяет условие .rules-release.
+.rules-release-manual:
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+      when: manual
